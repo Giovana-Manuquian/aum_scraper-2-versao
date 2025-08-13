@@ -3,62 +3,57 @@ FROM python:3.11-slim
 
 # Define variáveis de ambiente
 ENV PYTHONUNBUFFERED=1
-ENV PYTHONPATH=/app
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Instala dependências do sistema, incluindo fontes necessárias para Playwright
+# Instala dependências do sistema necessárias para Playwright
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
     curl \
     unzip \
-    xvfb \
+    fonts-liberation \
+    fonts-noto-color-emoji \
+    fonts-noto-cjk \
+    fonts-dejavu-core \
+    libglib2.0-0 \
     libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
     libatk-bridge2.0-0 \
+    libcups2 \
     libdrm2 \
+    libdbus-1-3 \
+    libxcb1 \
     libxkbcommon0 \
+    libx11-6 \
     libxcomposite1 \
     libxdamage1 \
+    libxext6 \
+    libxfixes3 \
     libxrandr2 \
     libgbm1 \
+    libpango-1.0-0 \
+    libcairo2 \
     libasound2 \
-    libxss1 \
-    libgtk-3-0 \
-    libgdk-pixbuf-xlib-2.0-0 \
-    libxshmfence1 \
-    fonts-liberation \
-    fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 # Define diretório de trabalho
 WORKDIR /app
 
-# Copia requirements primeiro para aproveitar cache do Docker
+# Copia requirements primeiro para cache
 COPY requirements.txt .
 
 # Instala dependências Python
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Instala Playwright browsers (chromium) sem --with-deps para evitar erros
+# Instala Playwright SEM dependências automáticas
 RUN playwright install chromium
 
-# Copia código da aplicação
+# Copia o código da aplicação
 COPY . .
 
-# Cria diretório para exports
-RUN mkdir -p exports
-
-# Cria usuário não-root para segurança
-RUN useradd --create-home --shell /bin/bash app \
-    && chown -R app:app /app
-USER app
-
-# Expõe porta
+# Expõe a porta
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
-
-# Comando para iniciar a aplicação
-CMD ["python", "main.py"]
+# Comando para executar
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

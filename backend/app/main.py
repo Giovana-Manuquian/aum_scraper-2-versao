@@ -565,16 +565,50 @@ async def process_company_scraping(company_id: int, company_data: dict):
                             result['source_type']
                         )
                         
-                        # Salva no banco (simplificado para exemplo)
+                        # Salva no banco
+                        await save_scraping_data_to_database(
+                            company_id, 
+                            result, 
+                            aum_result, 
+                            len(chunks)
+                        )
+                        
                         logger.info(f"AUM extraído para {company_data['name']}: {aum_result}")
                     except Exception as ai_error:
                         logger.error(f"Erro na IA para {company_data['name']}: {ai_error}")
                         import traceback
                         logger.error(f"Traceback IA: {traceback.format_exc()}")
+                        
+                        # Salva log de erro mesmo assim
+                        await save_scraping_data_to_database(
+                            company_id, 
+                            result, 
+                            None, 
+                            0,
+                            error_message=str(ai_error)
+                        )
                 else:
                     logger.warning(f"Nenhum chunk relevante encontrado para {company_data['name']}")
+                    
+                    # Salva log mesmo sem chunks
+                    await save_scraping_data_to_database(
+                        company_id, 
+                        result, 
+                        None, 
+                        0,
+                        error_message="Nenhum chunk relevante encontrado"
+                    )
             else:
                 logger.warning(f"Resultado {i+1} para {company_data['name']} falhou: {result.get('status', 'unknown')}")
+                
+                # Salva log de falha
+                await save_scraping_data_to_database(
+                    company_id, 
+                    result, 
+                    None, 
+                    0,
+                    error_message=f"Status: {result.get('status', 'unknown')}"
+                )
         
         logger.info(f"Processamento concluído para empresa: {company_data['name']}")
         
@@ -583,6 +617,79 @@ async def process_company_scraping(company_id: int, company_data: dict):
         # Log mais detalhado para debug
         import traceback
         logger.error(f"Traceback completo: {traceback.format_exc()}")
+
+async def save_scraping_data_to_database(
+    company_id: int, 
+    result: dict, 
+    aum_result: dict, 
+    chunks_count: int,
+    error_message: str = None
+):
+    """Salva dados de scraping no banco de dados"""
+    try:
+        # Cria sessão do banco
+        from .models.database import SessionLocal
+        db = SessionLocal()
+        
+        try:
+            # 1. Salva ScrapeLog
+            scrape_log = ScrapeLog(
+                company_id=company_id,
+                source_url=result.get('url', ''),
+                source_type=result.get('source_type', 'unknown'),
+                status=result.get('status', 'unknown'),
+                content_length=len(result.get('content', '')) if result.get('content') else 0,
+                error_message=error_message,
+                is_blocked=False
+            )
+            db.add(scrape_log)
+            db.flush()  # Para obter o ID
+            
+            # 2. Salva AumSnapshot SEMPRE (conforme documento)
+            # Mesmo com AUM = None, salva para auditoria e relatórios
+            aum_snapshot = AumSnapshot(
+                company_id=company_id,
+                scrape_log_id=scrape_log.id,
+                aum_value=aum_result.get('aum_value') if aum_result else None,
+                aum_currency=aum_result.get('aum_currency', 'BRL') if aum_result else 'BRL',
+                aum_unit=aum_result.get('aum_unit') if aum_result else None,
+                aum_text=aum_result.get('aum_text') if aum_result else 'NAO_DISPONIVEL',
+                source_url=result.get('url', ''),
+                source_type=result.get('source_type', 'unknown'),
+                confidence_score=aum_result.get('confidence_score', 0.0) if aum_result else 0.0,
+                is_verified=False
+            )
+            db.add(aum_snapshot)
+            
+            # 3. Salva Usage (monitoramento de tokens)
+            if aum_result and aum_result.get('tokens_used', 0) > 0:
+                usage = Usage(
+                    company_id=company_id,
+                    operation_type='ai_processing',
+                    tokens_used=aum_result.get('tokens_used', 0),
+                    tokens_limit=100000,  # Limite configurável
+                    cost_usd=None,  # Pode ser calculado se necessário
+                    api_calls=1,
+                    date=datetime.now().date()
+                )
+                db.add(usage)
+            
+            # Commit das transações
+            db.commit()
+            logger.info(f"Dados salvos no banco para empresa {company_id} - AumSnapshot criado")
+            
+        except Exception as db_error:
+            db.rollback()
+            logger.error(f"Erro ao salvar no banco: {db_error}")
+            raise
+            
+        finally:
+            db.close()
+            
+    except Exception as e:
+        logger.error(f"Erro na função de salvamento: {e}")
+        import traceback
+        logger.error(f"Traceback salvamento: {traceback.format_exc()}")
 
 async def generate_excel_report(db: Session):
     """Gera relatório Excel em background"""
