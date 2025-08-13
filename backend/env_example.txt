@@ -1,0 +1,224 @@
+# ============================================================================
+# AUM SCRAPER - VARIÁVEIS DE AMBIENTE
+# ============================================================================
+# 
+# Este arquivo contém todas as variáveis de ambiente necessárias para
+# executar o AUM Scraper conforme o documento de requisitos.
+#
+# INSTRUÇÕES:
+# 1. Copie este arquivo para .env
+# 2. Preencha os valores conforme seu ambiente
+# 3. NUNCA commite o arquivo .env no repositório
+#
+# ============================================================================
+
+# ============================================================================
+# CONFIGURAÇÕES OBRIGATÓRIAS
+# ============================================================================
+
+# Chave da API OpenAI (OBRIGATÓRIA)
+# Obtenha em: https://platform.openai.com/api-keys
+OPENAI_API_KEY=sua_chave_api_openai_aqui
+
+# ============================================================================
+# CONFIGURAÇÕES DE BANCO DE DADOS
+# ============================================================================
+
+# URL de conexão com PostgreSQL
+# Formato: postgresql://usuario:senha@host:porta/banco
+DATABASE_URL=postgresql://scraper:scraperpw@localhost:5432/scraperdb
+
+# Configurações de pool de conexões
+DATABASE_POOL_SIZE=10
+DATABASE_MAX_OVERFLOW=20
+
+# ============================================================================
+# CONFIGURAÇÕES DA API OPENAI
+# ============================================================================
+
+# Modelo da OpenAI para extração de dados
+OPENAI_MODEL=gpt-4o
+
+# Limite de tokens por requisição (conforme documento)
+MAX_TOKENS_PER_REQUEST=1500
+
+# Limite de tokens por dia (conforme documento)
+MAX_TOKENS_PER_DAY=100000
+
+# Alerta quando atingir % do budget diário
+BUDGET_ALERT_THRESHOLD=0.8
+
+# ============================================================================
+# CONFIGURAÇÕES DE SCRAPING
+# ============================================================================
+
+# Timeout para operações de scraping (segundos)
+SCRAPE_TIMEOUT=30
+
+# Número máximo de scrapes simultâneos
+MAX_CONCURRENT_SCRAPES=5
+
+# Delay entre requisições (segundos)
+SCRAPE_DELAY=1.0
+
+# User agent para requisições
+USER_AGENT=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
+
+# ============================================================================
+# CONFIGURAÇÕES DE RABBITMQ
+# ============================================================================
+
+# URL de conexão com RabbitMQ
+RABBITMQ_URL=amqp://guest:guest@localhost:5672/
+
+# Nome da fila principal
+QUEUE_NAME=aum_scraping_queue
+
+# ============================================================================
+# CONFIGURAÇÕES DE EXPORTAÇÃO
+# ============================================================================
+
+# Diretório para arquivos de exportação
+EXPORT_DIRECTORY=./exports
+
+# Formato de data para nomes de arquivo
+DATE_FORMAT=%Y%m%d_%H%M%S
+
+# ============================================================================
+# CONFIGURAÇÕES DE LOGGING
+# ============================================================================
+
+# Nível de logging (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+LOG_LEVEL=INFO
+
+# Formato das mensagens de log
+LOG_FORMAT=%(asctime)s - %(name)s - %(levelname)s - %(message)s
+
+# ============================================================================
+# CONFIGURAÇÕES DE SEGURANÇA
+# ============================================================================
+
+# Origens permitidas para CORS (separadas por vírgula)
+CORS_ORIGINS=*
+
+# Rate limiting - requisições por minuto
+RATE_LIMIT_REQUESTS=100
+
+# Rate limiting - janela de tempo (segundos)
+RATE_LIMIT_WINDOW=60
+
+# ============================================================================
+# CONFIGURAÇÕES DE TESTES
+# ============================================================================
+
+# Cobertura mínima de testes (conforme documento)
+MIN_TEST_COVERAGE=80.0
+
+# Diretório de testes
+TEST_DIRECTORY=./tests
+
+# ============================================================================
+# CONFIGURAÇÕES DE DESENVOLVIMENTO
+# ============================================================================
+
+# Modo de debug
+DEBUG=false
+
+# Ambiente da aplicação
+ENVIRONMENT=development
+
+# ============================================================================
+# CONFIGURAÇÕES AVANÇADAS
+# ============================================================================
+
+# Porta da aplicação
+PORT=8000
+
+# Host da aplicação
+HOST=0.0.0.0
+
+# Reload automático (apenas desenvolvimento)
+RELOAD=false
+
+# Workers da aplicação
+WORKERS=1
+
+# ============================================================================
+# CONFIGURAÇÕES DE MONITORAMENTO
+# ============================================================================
+
+# Habilitar métricas
+ENABLE_METRICS=true
+
+# Intervalo de coleta de métricas (segundos)
+METRICS_INTERVAL=60
+
+# ============================================================================
+# CONFIGURAÇÕES DE BACKUP
+# ============================================================================
+
+# Habilitar backup automático
+ENABLE_BACKUP=false
+
+# Diretório de backup
+BACKUP_DIRECTORY=./backups
+
+# Frequência de backup (dias)
+BACKUP_FREQUENCY=7
+
+# ============================================================================
+# EXEMPLOS DE CONFIGURAÇÃO POR AMBIENTE
+# ============================================================================
+
+# DESENVOLVIMENTO
+# ENVIRONMENT=development
+# DEBUG=true
+# LOG_LEVEL=DEBUG
+# CORS_ORIGINS=*
+
+# STAGING
+# ENVIRONMENT=staging
+# DEBUG=false
+# LOG_LEVEL=INFO
+# CORS_ORIGINS=https://staging.seu-dominio.com
+
+# PRODUÇÃO
+# ENVIRONMENT=production
+# DEBUG=false
+# LOG_LEVEL=WARNING
+# CORS_ORIGINS=https://seu-dominio.com
+# ENABLE_BACKUP=true
+# ENABLE_METRICS=true
+
+# ============================================================================
+# NOTAS IMPORTANTES
+# ============================================================================
+
+# 1. OPENAI_API_KEY é OBRIGATÓRIA para funcionamento
+# 2. DATABASE_URL deve apontar para um PostgreSQL válido
+# 3. RABBITMQ_URL deve apontar para um RabbitMQ válido
+# 4. Em produção, sempre use HTTPS e origens restritas
+# 5. Monitore o uso de tokens OpenAI para controle de custos
+# 6. Configure backups automáticos em produção
+# 7. Use variáveis de ambiente diferentes por ambiente
+# 8. NUNCA commite senhas ou chaves no repositório
+# 9. Valide todas as configurações antes de executar
+# 10. Mantenha logs para auditoria e debugging
+
+# ============================================================================
+# VALIDAÇÃO DE CONFIGURAÇÃO
+# ============================================================================
+
+# Para validar as configurações, execute:
+# python -c "from app.config import settings; print('✅ Configurações válidas')"
+
+# ============================================================================
+# SUPORTE
+# ============================================================================
+
+# Em caso de problemas:
+# 1. Verifique os logs da aplicação
+# 2. Valide as variáveis de ambiente
+# 3. Teste as conexões (banco, RabbitMQ, OpenAI)
+# 4. Consulte a documentação em /docs
+# 5. Abra uma issue no repositório

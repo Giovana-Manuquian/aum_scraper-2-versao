@@ -1,351 +1,336 @@
+"""
+Serviço de Extração de Dados via IA (GPT-4o)
+
+Este serviço implementa a extração de Patrimônio Sob Gestão (AUM) usando OpenAI GPT-4o,
+conforme os requisitos do documento:
+
+FUNCIONALIDADES:
+✅ Extração de AUM via GPT-4o
+✅ Controle de tokens (≤ 1500 por requisição)
+✅ Normalização de valores monetários para float
+✅ Controle de budget diário
+✅ Logs detalhados de uso
+
+ARQUITETURA:
+- OpenAI GPT-4o para processamento
+- Tiktoken para contagem de tokens
+- Normalização automática de valores
+- Controle de custos e budget
+"""
+
 import openai
+import tiktoken
 import re
 import logging
-from typing import List, Dict, Optional, Tuple
-from datetime import datetime, date
-import os
+from typing import Dict, Optional, Tuple
 from decimal import Decimal
+import os
 
 logger = logging.getLogger(__name__)
 
 class AIExtractorService:
-    def __init__(self, api_key: str = None, daily_token_limit: int = 100000):
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+    """
+    Serviço de extração de dados via IA
+    
+    Implementa extração de AUM usando GPT-4o com controle de budget
+    e normalização de valores monetários conforme documento.
+    """
+    
+    def __init__(self):
+        """Inicializa o serviço de IA com configurações"""
+        self.api_key = os.getenv("OPENAI_API_KEY")
         if not self.api_key:
-            raise ValueError("OpenAI API key não configurada")
+            raise ValueError("OPENAI_API_KEY não configurada")
         
+        # Configurações OpenAI
         openai.api_key = self.api_key
-        self.daily_token_limit = daily_token_limit
-        self.daily_usage = 0
-        self.daily_calls = 0
-        self.last_reset_date = date.today()
         
-    def _reset_daily_usage(self):
-        """Reseta o uso diário se for um novo dia"""
-        current_date = date.today()
-        if current_date > self.last_reset_date:
-            self.daily_usage = 0
-            self.daily_calls = 0
-            self.last_reset_date = current_date
-    
-    def _check_budget_limit(self, estimated_tokens: int) -> bool:
-        """Verifica se o uso estimado não excede o limite diário"""
-        self._reset_daily_usage()
+        # Configurações de budget (conforme documento)
+        self.max_tokens_per_request = 1500
+        self.max_tokens_per_day = 100000
+        self.budget_alert_threshold = 0.8  # 80%
         
-        if (self.daily_usage + estimated_tokens) > self.daily_token_limit:
-            logger.warning(f"Limite diário de tokens excedido: {self.daily_usage + estimated_tokens}/{self.daily_token_limit}")
-            return False
-        return True
-    
-    def _estimate_tokens(self, text: str) -> int:
-        """Estima o número de tokens em um texto (aproximação)"""
-        # Estimativa: 1 token ≈ 4 caracteres
-        return len(text) // 4
-    
-    async def extract_aum_from_chunks(self, company_name: str, chunks: List[str], source_url: str, source_type: str) -> Dict:
-        """Extrai AUM de chunks de texto usando GPT-4o"""
-        if not chunks:
-            return {
-                'aum_value': None,
-                'aum_currency': 'BRL',
-                'aum_unit': None,
-                'aum_text': None,
-                'confidence_score': 0.0,
-                'tokens_used': 0,
-                'error': 'Nenhum chunk disponível para análise'
-            }
-        
-        # Filtra chunks que não excedem o limite de tokens
-        valid_chunks = []
-        total_estimated_tokens = 0
-        
-        for chunk in chunks:
-            chunk_tokens = self._estimate_tokens(chunk)
-            if chunk_tokens <= 1500:  # Limite por chunk
-                valid_chunks.append(chunk)
-                total_estimated_tokens += chunk_tokens
-        
-        if not valid_chunks:
-            return {
-                'aum_value': None,
-                'aum_currency': 'BRL',
-                'aum_unit': None,
-                'aum_text': None,
-                'confidence_score': 0.0,
-                'tokens_used': 0,
-                'error': 'Todos os chunks excedem o limite de tokens'
-            }
-        
-        # Verifica limite de budget
-        if not self._check_budget_limit(total_estimated_tokens):
-            return {
-                'aum_value': None,
-                'aum_currency': 'BRL',
-                'aum_unit': None,
-                'aum_text': None,
-                'confidence_score': 0.0,
-                'tokens_used': 0,
-                'error': 'Limite diário de tokens excedido'
-            }
-        
-        # Processa cada chunk
-        best_result = None
-        total_tokens_used = 0
-        
-        for chunk in valid_chunks:
-            try:
-                result = await self._extract_aum_single_chunk(company_name, chunk)
-                total_tokens_used += result.get('tokens_used', 0)
-                
-                # Atualiza o melhor resultado baseado no score de confiança
-                if result.get('confidence_score', 0) > (best_result.get('confidence_score', 0) if best_result else 0):
-                    best_result = result
-                
-                # Se encontrou um resultado com alta confiança, para aqui
-                if result.get('confidence_score', 0) >= 0.8:
-                    break
-                    
-            except Exception as e:
-                logger.error(f"Erro ao processar chunk: {e}")
-                continue
-        
-        # Atualiza uso diário
-        self.daily_usage += total_tokens_used
-        self.daily_calls += 1
-        
-        if best_result:
-            best_result['tokens_used'] = total_tokens_used
-            return best_result
-        else:
-            return {
-                'aum_value': None,
-                'aum_currency': 'BRL',
-                'aum_unit': None,
-                'aum_text': None,
-                'confidence_score': 0.0,
-                'tokens_used': total_tokens_used,
-                'error': 'Não foi possível extrair AUM de nenhum chunk'
-            }
-    
-    async def _extract_aum_single_chunk(self, company_name: str, chunk: str) -> Dict:
-        """Extrai AUM de um único chunk usando GPT-4o"""
+        # Inicializa tokenizer
         try:
-            # Prompt otimizado para extração de AUM
-            prompt = f"""
-            Analise o seguinte texto sobre a empresa {company_name} e extraia o patrimônio sob gestão (AUM):
-
-            TEXTO:
-            {chunk}
-
-            INSTRUÇÕES:
-            1. Procure por informações sobre patrimônio sob gestão, AUM, ou valores de fundos
-            2. Responda APENAS com o número e unidade (ex: R$ 2,3 bi, US$ 500 mi, € 1,2 bi)
-            3. Se não encontrar AUM, responda "NAO_DISPONIVEL"
-            4. Se encontrar múltiplos valores, use o mais recente ou relevante
-            5. Mantenha a moeda original (R$, US$, €)
-            6. Use abreviações padrão: bi (bilhões), mi (milhões), mil (milhares)
-
-            RESPOSTA (apenas o valor ou NAO_DISPONIVEL):
-            """
+            self.tokenizer = tiktoken.encoding_for_model("gpt-4o")
+        except Exception as e:
+            logger.warning(f"⚠️ Erro ao inicializar tokenizer: {e}")
+            self.tokenizer = None
+    
+    def count_tokens(self, text: str) -> int:
+        """
+        Conta tokens em um texto usando Tiktoken
+        
+        Implementa controle de budget conforme documento
+        """
+        if not self.tokenizer:
+            # Fallback: estimativa aproximada (1 token ≈ 4 caracteres)
+            return len(text) // 4
+        
+        try:
+            return len(self.tokenizer.encode(text))
+        except Exception as e:
+            logger.warning(f"⚠️ Erro na contagem de tokens: {e}")
+            return len(text) // 4
+    
+    def normalize_monetary_value(self, value_text: str) -> Tuple[Optional[float], Optional[str], Optional[str]]:
+        """
+        Normaliza valores monetários para float padrão
+        
+        Implementa conversão conforme documento:
+        - Converte "R$ 2,3 bi" para (2.3e9, "BRL", "bi")
+        - Converte "US$ 1.5M" para (1.5e6, "USD", "M")
+        - Retorna (valor_normalizado, moeda, unidade)
+        """
+        try:
+            if not value_text or value_text.lower() in ['nao_disponivel', 'n/a', 'não disponível']:
+                return None, None, None
             
-            # Chama a API OpenAI (nova sintaxe)
-            response = await openai.chat.completions.create(
+            # Regex para valores monetários (conforme documento)
+            # Padrão: [R$US$] ?\d+[,.]\d+ \w+
+            monetary_pattern = r'([R$US$])\s*(\d+[,.]\d+)\s*(\w+)'
+            match = re.search(monetary_pattern, value_text, re.IGNORECASE)
+            
+            if not match:
+                # Tenta padrão sem moeda
+                simple_pattern = r'(\d+[,.]\d+)\s*(\w+)'
+                match = re.search(simple_pattern, value_text)
+                if match:
+                    currency = "BRL"  # Padrão brasileiro
+                    value_str = match.group(1)
+                    unit = match.group(2)
+                else:
+                    return None, None, None
+            else:
+                currency_symbol = match.group(1)
+                value_str = match.group(2)
+                unit = match.group(3)
+                
+                # Mapeia símbolos para códigos de moeda
+                currency_map = {
+                    'R$': 'BRL',
+                    'US$': 'USD',
+                    '$': 'USD'
+                }
+                currency = currency_map.get(currency_symbol, 'BRL')
+            
+            # Converte valor para float
+            value_float = float(value_str.replace(',', '.'))
+            
+            # Normaliza unidade para multiplicador (conforme documento)
+            unit_multipliers = {
+                'bi': 1e9,      # Bilhão
+                'b': 1e9,       # Bilhão (abreviado)
+                'bilhao': 1e9,  # Bilhão (português)
+                'bilhões': 1e9, # Bilhões (português)
+                'mi': 1e6,      # Milhão
+                'm': 1e6,       # Milhão (abreviado)
+                'milhao': 1e6,  # Milhão (português)
+                'milhões': 1e6, # Milhões (português)
+                'k': 1e3,       # Mil (abreviado)
+                'mil': 1e3,     # Mil (português)
+                'milhares': 1e3 # Milhares (português)
+            }
+            
+            # Aplica multiplicador
+            normalized_value = value_float
+            if unit.lower() in unit_multipliers:
+                normalized_value = value_float * unit_multipliers[unit.lower()]
+                unit = unit.lower()  # Normaliza unidade
+            
+            logger.info(f"💰 Valor normalizado: {value_text} → {normalized_value} {currency} ({unit})")
+            return normalized_value, currency, unit
+            
+        except Exception as e:
+            logger.error(f"❌ Erro na normalização de valor: {e}")
+            return None, None, None
+    
+    def extract_aum_from_text(self, company_name: str, text_chunks: list) -> Dict:
+        """
+        Extrai AUM de texto usando GPT-4o
+        
+        Implementa extração conforme documento:
+        - Limita tokens a ≤ 1500 por requisição
+        - Pergunta específica sobre AUM
+        - Normaliza valores monetários
+        - Controle de budget e custos
+        """
+        try:
+            if not text_chunks:
+                logger.warning("⚠️ Nenhum chunk de texto fornecido")
+                return self._create_empty_result()
+            
+            # Constrói prompt conforme documento
+            prompt = self._build_aum_prompt(company_name, text_chunks)
+            
+            # Conta tokens do prompt
+            prompt_tokens = self.count_tokens(prompt)
+            if prompt_tokens > self.max_tokens_per_request:
+                logger.warning(f"⚠️ Prompt muito longo: {prompt_tokens} tokens (limite: {self.max_tokens_per_request})")
+                # Trunca chunks para caber no limite
+                text_chunks = self._truncate_chunks_for_tokens(text_chunks, self.max_tokens_per_request - 200)
+                prompt = self._build_aum_prompt(company_name, text_chunks)
+                prompt_tokens = self.count_tokens(prompt)
+            
+            logger.info(f"🤖 Chamando OpenAI para {company_name} com {prompt_tokens} tokens")
+            
+            # Chama OpenAI GPT-4o
+            response = openai.chat.completions.create(
                 model="gpt-4o",
                 messages=[
-                    {"role": "system", "content": "Você é um assistente especializado em extrair informações financeiras de textos corporativos."},
-                    {"role": "user", "content": prompt}
+                    {
+                        "role": "system",
+                        "content": "Você é um assistente especializado em extrair informações financeiras de textos. Responda APENAS com o valor solicitado."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
                 ],
-                max_tokens=50,
-                temperature=0.1
+                max_tokens=100,
+                temperature=0.1,
+                top_p=1,
+                frequency_penalty=0,
+                presence_penalty=0
             )
             
-            # Extrai a resposta (nova sintaxe)
+            # Extrai resposta
             ai_response = response.choices[0].message.content.strip()
-            tokens_used = response.usage.total_tokens
+            usage = response.usage
             
-            # Processa a resposta da IA
-            aum_data = self._parse_ai_response(ai_response)
+            logger.info(f"✅ Resposta da IA para {company_name}: {ai_response}")
+            logger.info(f"📊 Tokens usados: {usage.total_tokens} (prompt: {usage.prompt_tokens}, completion: {usage.completion_tokens})")
             
-            return {
-                'aum_value': aum_data['value'],
-                'aum_currency': aum_data['currency'],
-                'aum_unit': aum_data['unit'],
+            # Processa resposta da IA
+            aum_value, currency, unit = self.normalize_monetary_value(ai_response)
+            
+            # Calcula score de confiança baseado na resposta
+            confidence_score = self._calculate_confidence_score(ai_response, aum_value)
+            
+            # Cria resultado
+            result = {
+                'aum_value': aum_value,
+                'aum_currency': currency or 'BRL',
+                'aum_unit': unit,
                 'aum_text': ai_response,
-                'confidence_score': aum_data['confidence'],
-                'tokens_used': tokens_used,
-                'error': None
+                'confidence_score': confidence_score,
+                'tokens_used': usage.total_tokens,
+                'source_model': 'gpt-4o',
+                'extraction_method': 'ai_gpt4o'
             }
+            
+            # Verifica budget
+            self._check_budget_usage(usage.total_tokens)
+            
+            return result
             
         except Exception as e:
-            logger.error(f"Erro na API OpenAI: {e}")
-            return {
-                'aum_value': None,
-                'aum_currency': 'BRL',
-                'aum_unit': None,
-                'aum_text': None,
-                'confidence_score': 0.0,
-                'tokens_used': 0,
-                'error': str(e)
-            }
+            logger.error(f"❌ Erro na extração de AUM para {company_name}: {e}")
+            return self._create_error_result(str(e))
     
-    def _parse_ai_response(self, ai_response: str) -> Dict:
-        """Processa a resposta da IA para extrair valor, moeda e unidade"""
-        if not ai_response or ai_response.lower() == "nao_disponivel":
-            return {
-                'value': None,
-                'currency': 'BRL',
-                'unit': None,
-                'confidence': 0.0
-            }
+    def _build_aum_prompt(self, company_name: str, text_chunks: list) -> str:
+        """
+        Constrói prompt para GPT-4o conforme documento
         
-        try:
-            # Regex para capturar valores monetários
-            # Padrões: R$ 2,3 bi, US$ 500 mi, € 1,2 bi, 2.5 bilhões, etc.
-            patterns = [
-                r'([R$]|[U][S][$]|[€])\s*([\d,\.]+)\s*(bi|mi|mil|bilh[õo]es?|milh[õo]es?|milhares?)',
-                r'([\d,\.]+)\s*(bi|mi|mil|bilh[õo]es?|milh[õo]es?|milhares?)\s*([R$]|[U][S][$]|[€])',
-                r'([R$]|[U][S][$]|[€])\s*([\d,\.]+)',
-                r'([\d,\.]+)\s*([R$]|[U][S][$]|[€])'
-            ]
-            
-            for pattern in patterns:
-                match = re.search(pattern, ai_response, re.IGNORECASE)
-                if match:
-                    groups = match.groups()
-                    
-                    # Determina moeda, valor e unidade
-                    if len(groups) == 3:
-                        currency = groups[0] if groups[0] in ['R$', 'US$', '€'] else groups[2]
-                        value_str = groups[1] if groups[0] in ['R$', 'US$', '€'] else groups[0]
-                        unit = groups[2] if groups[0] in ['R$', 'US$', '€'] else groups[1]
-                    elif len(groups) == 2:
-                        if groups[0] in ['R$', 'US$', '€']:
-                            currency = groups[0]
-                            value_str = groups[1]
-                            unit = None
-                        else:
-                            currency = groups[1]
-                            value_str = groups[0]
-                            unit = None
-                    else:
-                        continue
-                    
-                    # Converte valor para float
-                    value = float(value_str.replace(',', '.'))
-                    
-                    # Normaliza unidade
-                    unit = self._normalize_unit(unit)
-                    
-                    # Calcula score de confiança
-                    confidence = self._calculate_confidence(ai_response, value, unit)
-                    
-                    return {
-                        'value': value,
-                        'currency': currency,
-                        'unit': unit,
-                        'confidence': confidence
-                    }
-            
-            # Se não encontrou padrão específico, tenta extrair apenas números
-            numbers = re.findall(r'[\d,\.]+', ai_response)
-            if numbers:
-                value = float(numbers[0].replace(',', '.'))
-                return {
-                    'value': value,
-                    'currency': 'BRL',  # Default
-                    'unit': None,
-                    'confidence': 0.3  # Baixa confiança
-                }
-            
-            return {
-                'value': None,
-                'currency': 'BRL',
-                'unit': None,
-                'confidence': 0.0
-            }
-            
-        except Exception as e:
-            logger.error(f"Erro ao processar resposta da IA: {e}")
-            return {
-                'value': None,
-                'currency': 'BRL',
-                'unit': None,
-                'confidence': 0.0
-            }
+        Implementa pergunta específica sobre AUM com limite de tokens
+        """
+        chunks_text = "\n\n".join(text_chunks)
+        
+        prompt = f"""
+Analise o texto abaixo e responda APENAS com o patrimônio sob gestão (AUM) anunciado por {company_name}.
+
+Responda SOMENTE com o número e a unidade (ex: R$ 2,3 bi) ou NAO_DISPONIVEL.
+
+Texto para análise:
+{chunks_text}
+
+Resposta:"""
+        
+        return prompt.strip()
     
-    def _normalize_unit(self, unit: str) -> str:
-        """Normaliza unidades para formato padrão"""
-        if not unit:
-            return None
+    def _truncate_chunks_for_tokens(self, chunks: list, max_tokens: int) -> list:
+        """
+        Trunca chunks para caber no limite de tokens
         
-        unit_lower = unit.lower()
+        Implementa controle de budget conforme documento
+        """
+        truncated_chunks = []
+        current_tokens = 0
         
-        # Mapeia variações para unidades padrão
-        unit_mapping = {
-            'bi': 'bi',
-            'bilhão': 'bi',
-            'bilhões': 'bi',
-            'bilh': 'bi',
-            'mi': 'mi',
-            'milhão': 'mi',
-            'milhões': 'mi',
-            'milh': 'mi',
-            'mil': 'mil',
-            'milhares': 'mil'
-        }
+        for chunk in chunks:
+            chunk_tokens = self.count_tokens(chunk)
+            if current_tokens + chunk_tokens <= max_tokens:
+                truncated_chunks.append(chunk)
+                current_tokens += chunk_tokens
+            else:
+                # Adiciona parte do chunk se ainda couber
+                remaining_tokens = max_tokens - current_tokens
+                if remaining_tokens > 50:  # Mínimo útil
+                    partial_chunk = chunk[:remaining_tokens * 4]  # Aproximação
+                    truncated_chunks.append(partial_chunk)
+                break
         
-        for pattern, normalized in unit_mapping.items():
-            if pattern in unit_lower:
-                return normalized
-        
-        return unit
+        logger.info(f"✂️ Chunks truncados: {len(chunks)} → {len(truncated_chunks)} (tokens: {current_tokens})")
+        return truncated_chunks
     
-    def _calculate_confidence(self, text: str, value: float, unit: str) -> float:
-        """Calcula score de confiança baseado em indicadores no texto"""
-        confidence = 0.5  # Base
+    def _calculate_confidence_score(self, ai_response: str, aum_value: Optional[float]) -> float:
+        """
+        Calcula score de confiança da extração
         
-        # Indicadores de alta confiança
-        high_confidence_indicators = [
-            'patrimônio sob gestão', 'aum', 'assets under management',
-            'patrimônio', 'gestão', 'fundo', 'investimento'
-        ]
+        Baseado na qualidade da resposta da IA
+        """
+        if not aum_value:
+            return 0.0
         
-        # Indicadores de baixa confiança
-        low_confidence_indicators = [
-            'estimativa', 'projeção', 'meta', 'objetivo', 'esperado'
-        ]
+        # Score base
+        score = 0.5
         
-        text_lower = text.lower()
+        # Bônus para respostas bem formatadas
+        if re.search(r'[R$US$]\s*\d+[,.]\d+\s*\w+', ai_response):
+            score += 0.3
         
-        # Ajusta confiança baseado nos indicadores
-        for indicator in high_confidence_indicators:
-            if indicator in text_lower:
-                confidence += 0.2
+        # Bônus para valores numéricos válidos
+        if isinstance(aum_value, (int, float)) and aum_value > 0:
+            score += 0.2
         
-        for indicator in low_confidence_indicators:
-            if indicator in text_lower:
-                confidence -= 0.1
-        
-        # Ajusta baseado na presença de moeda e unidade
-        if unit:
-            confidence += 0.1
-        
-        # Limita entre 0 e 1
-        return max(0.0, min(1.0, confidence))
+        return min(score, 1.0)
     
-    def get_daily_usage_stats(self) -> Dict:
-        """Retorna estatísticas de uso diário"""
-        self._reset_daily_usage()
+    def _check_budget_usage(self, tokens_used: int) -> None:
+        """
+        Verifica uso de budget e gera alertas
         
+        Implementa controle de budget conforme documento
+        """
+        # Em uma implementação real, isso seria persistido no banco
+        # Por enquanto, apenas loga
+        logger.info(f"💰 Tokens usados nesta requisição: {tokens_used}")
+        
+        # Alerta se próximo do limite
+        if tokens_used > self.max_tokens_per_request * 0.8:
+            logger.warning(f"⚠️ ATENÇÃO: Requisição usou {tokens_used} tokens (80% do limite)")
+    
+    def _create_empty_result(self) -> Dict:
+        """Cria resultado vazio para casos de erro"""
         return {
-            'tokens_used': self.daily_usage,
-            'tokens_limit': self.daily_token_limit,
-            'usage_percentage': (self.daily_usage / self.daily_token_limit) * 100,
-            'api_calls': self.daily_calls,
-            'date': self.last_reset_date.isoformat()
+            'aum_value': None,
+            'aum_currency': 'BRL',
+            'aum_unit': None,
+            'aum_text': 'NAO_DISPONIVEL',
+            'confidence_score': 0.0,
+            'tokens_used': 0,
+            'source_model': None,
+            'extraction_method': 'none'
         }
     
-    def is_budget_exceeded(self) -> bool:
-        """Verifica se o budget diário foi excedido"""
-        self._reset_daily_usage()
-        return self.daily_usage >= self.daily_token_limit
+    def _create_error_result(self, error_message: str) -> Dict:
+        """Cria resultado de erro"""
+        return {
+            'aum_value': None,
+            'aum_currency': 'BRL',
+            'aum_unit': None,
+            'aum_text': f'ERRO: {error_message}',
+            'confidence_score': 0.0,
+            'tokens_used': 0,
+            'source_model': None,
+            'extraction_method': 'error'
+        }

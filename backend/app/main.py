@@ -1,3 +1,29 @@
+"""
+AUM Scraper - Sistema de Coleta Automática de Patrimônio Sob Gestão (AUM)
+
+Este arquivo implementa a API principal do sistema conforme o documento de requisitos:
+
+FUNCIONALIDADES IMPLEMENTADAS:
+✅ Upload e processamento de CSV com empresas
+✅ Scraping web com Playwright (estático e dinâmico)
+✅ Extração de dados via IA (GPT-4o) - quando disponível
+✅ Persistência completa no PostgreSQL
+✅ Controle de budget de tokens
+✅ Geração de relatórios Excel
+✅ API REST completa com documentação
+
+ARQUITETURA:
+- FastAPI como framework web
+- SQLAlchemy 2 + PostgreSQL para persistência
+- RabbitMQ para tarefas assíncronas
+- Playwright para scraping dinâmico
+- OpenAI GPT-4o para extração de dados
+
+AUTOR: Sistema AUM Scraper
+VERSÃO: 1.0.0
+DATA: Agosto 2025
+"""
+
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -8,6 +34,7 @@ import logging
 import asyncio
 from datetime import datetime, date, timedelta
 import os
+from sqlalchemy import func
 
 from .models.database import get_db, engine, Base
 from .models import Company, ScrapeLog, AumSnapshot, Usage
@@ -19,21 +46,24 @@ from .services.scraper import ScraperService
 from .services.ai_extractor import AIExtractorService
 from .services.queue_service import QueueService
 
-# Configuração de logging
+# Configuração de logging com emojis para melhor visualização
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Cria tabelas do banco
+# Cria tabelas do banco automaticamente (desenvolvimento)
+# Em produção, usar Alembic para migrations
 Base.metadata.create_all(bind=engine)
 
-# Inicializa FastAPI
+# Inicializa FastAPI com metadados completos
 app = FastAPI(
     title="AUM Scraper API",
     description="API para coleta automática de Patrimônio Sob Gestão (AUM) de empresas financeiras",
-    version="1.0.0"
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc"
 )
 
-# Configuração CORS
+# Configuração CORS para permitir acesso de frontends
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -42,27 +72,35 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Inicializa serviços
+# Inicializa serviços globais
 queue_service = QueueService()
 ai_extractor = AIExtractorService()
 
 @app.on_event("startup")
 async def startup_event():
-    """Evento de inicialização da aplicação"""
+    """
+    Evento de inicialização da aplicação
+    
+    Conecta com RabbitMQ e inicializa todos os serviços necessários
+    """
     try:
         await queue_service.connect()
-        logger.info("Aplicação iniciada com sucesso")
+        logger.info("🚀 Aplicação iniciada com sucesso")
     except Exception as e:
-        logger.error(f"Erro na inicialização: {e}")
+        logger.error(f"❌ Erro na inicialização: {e}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Evento de encerramento da aplicação"""
+    """
+    Evento de encerramento da aplicação
+    
+    Desconecta serviços e libera recursos
+    """
     try:
         await queue_service.disconnect()
-        logger.info("Aplicação encerrada com sucesso")
+        logger.info("🛑 Aplicação encerrada com sucesso")
     except Exception as e:
-        logger.error(f"Erro no encerramento: {e}")
+        logger.error(f"❌ Erro no encerramento: {e}")
 
 # ============================================================================
 # ENDPOINTS DE EMPRESAS
@@ -70,7 +108,11 @@ async def shutdown_event():
 
 @app.post("/companies/", response_model=CompanyResponse)
 async def create_company(company: CompanyCreate, db: Session = Depends(get_db)):
-    """Cria uma nova empresa"""
+    """
+    Cria uma nova empresa no sistema
+    
+    Endpoint para adicionar empresas manualmente via API
+    """
     try:
         db_company = Company(**company.dict())
         db.add(db_company)
@@ -79,7 +121,7 @@ async def create_company(company: CompanyCreate, db: Session = Depends(get_db)):
         return db_company
     except Exception as e:
         db.rollback()
-        logger.error(f"Erro ao criar empresa: {e}")
+        logger.error(f"❌ Erro ao criar empresa: {e}")
         raise HTTPException(status_code=500, detail="Erro interno do servidor")
 
 @app.get("/companies/", response_model=List[CompanyResponse])
@@ -88,13 +130,21 @@ async def get_companies(
     limit: int = 100,
     db: Session = Depends(get_db)
 ):
-    """Lista todas as empresas"""
+    """
+    Lista todas as empresas cadastradas
+    
+    Suporta paginação para grandes volumes de dados
+    """
     companies = db.query(Company).offset(skip).limit(limit).all()
     return companies
 
 @app.get("/companies/{company_id}", response_model=CompanyResponse)
 async def get_company(company_id: int, db: Session = Depends(get_db)):
-    """Obtém uma empresa específica"""
+    """
+    Obtém uma empresa específica por ID
+    
+    Retorna dados completos da empresa incluindo relacionamentos
+    """
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
@@ -531,38 +581,41 @@ async def upload_companies_csv(
 # ============================================================================
 
 async def process_company_scraping(company_id: int, company_data: dict):
-    """Processa scraping de uma empresa em background"""
+    """
+    Processa scraping de uma empresa em background
+    
+    Esta função é responsável por:
+    - Executar o serviço de scraping para obter conteúdo web
+    - Processar o conteúdo com IA para extrair AUM
+    - Persistir os dados no banco de dados
+    - Gerenciar logs de scraping e erros
+    """
     try:
-        logger.info(f"Iniciando scraping para empresa: {company_data['name']}")
+        logger.info(f"🚀 Iniciando scraping para empresa: {company_data['name']}")
         
         # Executa scraping
         async with ScraperService() as scraper:
             scraping_results = await scraper.scrape_company_sources(company_data)
         
-        logger.info(f"Scraping concluído para {company_data['name']}. Resultados: {len(scraping_results)}")
+        logger.info(f"✅ Scraping concluído para {company_data['name']}. Resultados: {len(scraping_results)}")
         
         # Processa resultados com IA
         for i, result in enumerate(scraping_results):
-            logger.info(f"Processando resultado {i+1}/{len(scraping_results)} para {company_data['name']}")
+            logger.info(f"📝 Processando resultado {i+1}/{len(scraping_results)} para {company_data['name']}")
             
             if result['status'] == 'success' and result['content']:
                 # Extrai chunks relevantes
                 chunks = scraper.extract_relevant_chunks(result['content'])
-                logger.info(f"Chunks extraídos para {company_data['name']}: {len(chunks)}")
+                logger.info(f"🧠 Chunks extraídos para {company_data['name']}: {len(chunks)}")
                 
                 if chunks:
                     # Processa com IA
-                    logger.info(f"Chamando IA para {company_data['name']} com {len(chunks)} chunks")
+                    logger.info(f"🤖 Chamando IA para {company_data['name']} com {len(chunks)} chunks")
                     try:
-                        # Cria nova instância do AIExtractorService
-                        from .services.ai_extractor import AIExtractorService
-                        ai_service = AIExtractorService()
-                        
-                        aum_result = await ai_service.extract_aum_from_chunks(
+                        # Usa a instância global do AIExtractorService
+                        aum_result = await ai_extractor.extract_aum_from_text(
                             company_data['name'],
-                            chunks,
-                            result['url'],
-                            result['source_type']
+                            chunks
                         )
                         
                         # Salva no banco
@@ -573,11 +626,11 @@ async def process_company_scraping(company_id: int, company_data: dict):
                             len(chunks)
                         )
                         
-                        logger.info(f"AUM extraído para {company_data['name']}: {aum_result}")
+                        logger.info(f"💰 AUM extraído para {company_data['name']}: {aum_result}")
                     except Exception as ai_error:
-                        logger.error(f"Erro na IA para {company_data['name']}: {ai_error}")
+                        logger.error(f"❌ Erro na IA para {company_data['name']}: {ai_error}")
                         import traceback
-                        logger.error(f"Traceback IA: {traceback.format_exc()}")
+                        logger.error(f"🔍 Traceback IA: {traceback.format_exc()}")
                         
                         # Salva log de erro mesmo assim
                         await save_scraping_data_to_database(
@@ -588,7 +641,7 @@ async def process_company_scraping(company_id: int, company_data: dict):
                             error_message=str(ai_error)
                         )
                 else:
-                    logger.warning(f"Nenhum chunk relevante encontrado para {company_data['name']}")
+                    logger.warning(f"⚠️ Nenhum chunk relevante encontrado para {company_data['name']}")
                     
                     # Salva log mesmo sem chunks
                     await save_scraping_data_to_database(
@@ -599,7 +652,7 @@ async def process_company_scraping(company_id: int, company_data: dict):
                         error_message="Nenhum chunk relevante encontrado"
                     )
             else:
-                logger.warning(f"Resultado {i+1} para {company_data['name']} falhou: {result.get('status', 'unknown')}")
+                logger.warning(f"⚠️ Resultado {i+1} para {company_data['name']} falhou: {result.get('status', 'unknown')}")
                 
                 # Salva log de falha
                 await save_scraping_data_to_database(
@@ -610,13 +663,13 @@ async def process_company_scraping(company_id: int, company_data: dict):
                     error_message=f"Status: {result.get('status', 'unknown')}"
                 )
         
-        logger.info(f"Processamento concluído para empresa: {company_data['name']}")
+        logger.info(f"✅ Processamento concluído para empresa: {company_data['name']}")
         
     except Exception as e:
-        logger.error(f"Erro no scraping da empresa {company_data['name']}: {e}")
+        logger.error(f"❌ Erro no scraping da empresa {company_data['name']}: {e}")
         # Log mais detalhado para debug
         import traceback
-        logger.error(f"Traceback completo: {traceback.format_exc()}")
+        logger.error(f"🔍 Traceback completo: {traceback.format_exc()}")
 
 async def save_scraping_data_to_database(
     company_id: int, 
@@ -625,14 +678,22 @@ async def save_scraping_data_to_database(
     chunks_count: int,
     error_message: str = None
 ):
-    """Salva dados de scraping no banco de dados"""
+    """
+    Salva dados de scraping no banco de dados
+    
+    Esta função implementa a persistência completa conforme o documento:
+    - Sempre salva ScrapeLog para auditoria
+    - Sempre salva AumSnapshot (mesmo com AUM = None)
+    - Salva Usage para monitoramento de tokens
+    - Implementa controle de budget e custos
+    """
     try:
         # Cria sessão do banco
         from .models.database import SessionLocal
         db = SessionLocal()
         
         try:
-            # 1. Salva ScrapeLog
+            # 1. Salva ScrapeLog (obrigatório para auditoria)
             scrape_log = ScrapeLog(
                 company_id=company_id,
                 source_url=result.get('url', ''),
@@ -647,13 +708,20 @@ async def save_scraping_data_to_database(
             
             # 2. Salva AumSnapshot SEMPRE (conforme documento)
             # Mesmo com AUM = None, salva para auditoria e relatórios
+            # Implementa "NAO_DISPONIVEL" quando não consegue extrair
+            aum_text = "NAO_DISPONIVEL"
+            if aum_result and aum_result.get('aum_text'):
+                aum_text = aum_result.get('aum_text')
+            elif aum_result and aum_result.get('aum_value') is not None:
+                aum_text = f"{aum_result.get('aum_value')} {aum_result.get('aum_unit', '')}"
+            
             aum_snapshot = AumSnapshot(
                 company_id=company_id,
                 scrape_log_id=scrape_log.id,
                 aum_value=aum_result.get('aum_value') if aum_result else None,
                 aum_currency=aum_result.get('aum_currency', 'BRL') if aum_result else 'BRL',
                 aum_unit=aum_result.get('aum_unit') if aum_result else None,
-                aum_text=aum_result.get('aum_text') if aum_result else 'NAO_DISPONIVEL',
+                aum_text=aum_text,  # Sempre preenchido
                 source_url=result.get('url', ''),
                 source_type=result.get('source_type', 'unknown'),
                 confidence_score=aum_result.get('confidence_score', 0.0) if aum_result else 0.0,
@@ -661,7 +729,8 @@ async def save_scraping_data_to_database(
             )
             db.add(aum_snapshot)
             
-            # 3. Salva Usage (monitoramento de tokens)
+            # 3. Salva Usage (monitoramento de tokens e budget)
+            # Implementa controle de custos conforme documento
             if aum_result and aum_result.get('tokens_used', 0) > 0:
                 usage = Usage(
                     company_id=company_id,
@@ -673,26 +742,43 @@ async def save_scraping_data_to_database(
                     date=datetime.now().date()
                 )
                 db.add(usage)
+                
+                # Verifica se atingiu 80% do budget (alerta conforme documento)
+                total_tokens_today = db.query(Usage).filter(
+                    Usage.date == datetime.now().date(),
+                    Usage.operation_type == 'ai_processing'
+                ).with_entities(func.sum(Usage.tokens_used)).scalar() or 0
+                
+                if total_tokens_today > 80000:  # 80% de 100000
+                    logger.warning(f"⚠️ ATENÇÃO: Budget de tokens atingiu {total_tokens_today/100000*100:.1f}% do limite diário!")
             
             # Commit das transações
             db.commit()
-            logger.info(f"Dados salvos no banco para empresa {company_id} - AumSnapshot criado")
+            logger.info(f"✅ Dados salvos no banco para empresa {company_id} - AumSnapshot criado com texto: {aum_text}")
             
         except Exception as db_error:
             db.rollback()
-            logger.error(f"Erro ao salvar no banco: {db_error}")
+            logger.error(f"❌ Erro ao salvar no banco: {db_error}")
             raise
             
         finally:
             db.close()
             
     except Exception as e:
-        logger.error(f"Erro na função de salvamento: {e}")
+        logger.error(f"❌ Erro na função de salvamento: {e}")
         import traceback
-        logger.error(f"Traceback salvamento: {traceback.format_exc()}")
+        logger.error(f"🔍 Traceback salvamento: {traceback.format_exc()}")
 
 async def generate_excel_report(db: Session):
-    """Gera relatório Excel em background"""
+    """
+    Gera relatório Excel em background
+    
+    Esta função é responsável por:
+    - Coletar dados de AUM de todas as empresas
+    - Organizar os dados em um DataFrame
+    - Gerar um arquivo Excel com o relatório
+    - Salvar o arquivo no diretório de exports
+    """
     try:
         # Busca dados
         companies = db.query(Company).all()
@@ -730,10 +816,10 @@ async def generate_excel_report(db: Session):
         with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
             df.to_excel(writer, sheet_name='AUM Report', index=False)
         
-        logger.info(f"Relatório Excel gerado: {filepath}")
+        logger.info(f"📄 Relatório Excel gerado: {filepath}")
         
     except Exception as e:
-        logger.error(f"Erro ao gerar relatório Excel: {e}")
+        logger.error(f"❌ Erro ao gerar relatório Excel: {e}")
 
 # ============================================================================
 # HEALTH CHECK
@@ -741,7 +827,11 @@ async def generate_excel_report(db: Session):
 
 @app.get("/health")
 async def health_check():
-    """Health check da aplicação"""
+    """
+    Health check da aplicação
+    
+    Verifica a disponibilidade geral da aplicação
+    """
     return {
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat(),
