@@ -796,7 +796,7 @@ async def generate_excel_report(db: Session):
                 'Empresa': company.name,
                 'Setor': company.sector or 'N/A',
                 'Funcionários': company.employees_count or 'N/A',
-                'AUM Valor': company_aum.aum_value if company_aum else 'N/A',
+                'AUM Valor': company_aum.aum_text if company_aum and company_aum.aum_text else 'N/A',
                 'AUM Moeda': company_aum.aum_currency if company_aum else 'N/A',
                 'AUM Unidade': company_aum.aum_unit if company_aum else 'N/A',
                 'Fonte': company_aum.source_url if company_aum else 'N/A',
