@@ -362,4 +362,4 @@ Este projeto está sob a licença MIT. Veja o arquivo `LICENSE` para mais detalh
 
 ---
 
-**Desenvolvido com ❤️ para automatizar a coleta de dados financeiros**
+**Desenvolvido por Giovana Manuquian 2025**
