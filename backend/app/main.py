@@ -175,19 +175,54 @@ async def update_company(
 
 @app.delete("/companies/{company_id}")
 async def delete_company(company_id: int, db: Session = Depends(get_db)):
-    """Remove uma empresa"""
-    db_company = db.query(Company).filter(Company.id == company_id).first()
-    if not db_company:
-        raise HTTPException(status_code=404, detail="Empresa não encontrada")
-    
+    """Remove uma empresa e todos os dados relacionados"""
     try:
+        # Busca a empresa
+        db_company = db.query(Company).filter(Company.id == company_id).first()
+        if not db_company:
+            raise HTTPException(status_code=404, detail="Empresa não encontrada")
+        
+        logger.info(f"🗑️ Iniciando remoção da empresa {company_id} ({db_company.name})")
+        
+        # Conta registros relacionados
+        aum_count = db.query(AumSnapshot).filter(AumSnapshot.company_id == company_id).count()
+        scrape_count = db.query(ScrapeLog).filter(ScrapeLog.company_id == company_id).count()
+        
+        logger.info(f"📊 Encontrados {aum_count} AUM snapshots e {scrape_count} scrape logs")
+        
+        # Remove todos os AUM snapshots relacionados
+        if aum_count > 0:
+            db.query(AumSnapshot).filter(AumSnapshot.company_id == company_id).delete()
+            logger.info(f"✅ {aum_count} AUM snapshots removidos")
+        
+        # Remove todos os logs de scraping relacionados
+        if scrape_count > 0:
+            db.query(ScrapeLog).filter(ScrapeLog.company_id == company_id).delete()
+            logger.info(f"✅ {scrape_count} scrape logs removidos")
+        
+        # Remove a empresa
         db.delete(db_company)
         db.commit()
-        return {"message": "Empresa removida com sucesso"}
+        
+        logger.info(f"✅ Empresa {company_id} removida com sucesso")
+        
+        return {
+            "message": "Empresa removida com sucesso",
+            "deleted_aum_snapshots": aum_count,
+            "deleted_scrape_logs": scrape_count,
+            "company_name": db_company.name
+        }
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
     except Exception as e:
         db.rollback()
-        logger.error(f"Erro ao remover empresa: {e}")
-        raise HTTPException(status_code=500, detail="Erro interno do servidor")
+        error_msg = f"Erro ao remover empresa {company_id}: {str(e)}"
+        logger.error(error_msg)
+        logger.error(f"🔍 Tipo do erro: {type(e).__name__}")
+        import traceback
+        logger.error(f"🔍 Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=error_msg)
 
 # ============================================================================
 # ENDPOINTS DE SCRAPING
@@ -782,13 +817,26 @@ async def generate_excel_report(db: Session):
     try:
         # Busca dados
         companies = db.query(Company).all()
-        aum_snapshots = db.query(AumSnapshot).all()
+        
+        # Busca apenas o snapshot mais recente de cada empresa
+        latest_snapshots = db.query(
+            AumSnapshot.company_id,
+            AumSnapshot.id.label('latest_id')
+        ).distinct(AumSnapshot.company_id).order_by(
+            AumSnapshot.company_id,
+            AumSnapshot.created_at.desc()
+        ).subquery()
+        
+        latest_aum_snapshots = db.query(AumSnapshot).join(
+            latest_snapshots,
+            AumSnapshot.id == latest_snapshots.c.latest_id
+        ).all()
         
         # Cria DataFrame
         data = []
         for company in companies:
             company_aum = next(
-                (aum for aum in aum_snapshots if aum.company_id == company.id),
+                (aum for aum in latest_aum_snapshots if aum.company_id == company.id),
                 None
             )
             
