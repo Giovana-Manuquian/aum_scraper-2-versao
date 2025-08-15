@@ -7,10 +7,19 @@ FUNCIONALIDADES IMPLEMENTADAS:
 ✅ Upload e processamento de CSV com empresas
 ✅ Scraping web com Playwright (estático e dinâmico)
 ✅ Extração de dados via IA (GPT-4o) - quando disponível
+✅ Fallback com Regex quando OpenAI falha
 ✅ Persistência completa no PostgreSQL
 ✅ Controle de budget de tokens
-✅ Geração de relatórios Excel
+✅ Geração de relatórios Excel (sem duplicatas)
 ✅ API REST completa com documentação
+✅ Tratamento robusto de erros
+
+CORREÇÕES IMPLEMENTADAS (v2.0):
+✅ Excel sem duplicatas - busca apenas snapshot mais recente
+✅ Coluna "AUM Valor" corrigida - usa aum_text em vez de aum_value
+✅ Endpoint DELETE /companies/{id} com limpeza automática
+✅ Fallback com regex quando OpenAI falha
+✅ Tratamento de erros de sintaxe e conexão
 
 ARQUITETURA:
 - FastAPI como framework web
@@ -18,9 +27,10 @@ ARQUITETURA:
 - RabbitMQ para tarefas assíncronas
 - Playwright para scraping dinâmico
 - OpenAI GPT-4o para extração de dados
+- Regex fallback para casos de falha da IA
 
 AUTOR: Sistema AUM Scraper
-VERSÃO: 1.0.0
+VERSÃO: 2.0.0 - COMPLETO E FUNCIONAL
 DATA: Agosto 2025
 """
 

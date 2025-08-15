@@ -6,11 +6,28 @@ Sistema Full-Stack em Python 3.11 para coleta automática de Patrimônio Sob Ges
 
 - **Web Scraping Inteligente**: Usa Playwright para capturar conteúdo estático e dinâmico
 - **IA GPT-4o**: Extração automática de AUM com controle de budget de tokens
+- **Fallback com Regex**: Sistema inteligente que extrai valores quando IA falha
 - **Paralelismo Controlado**: Sistema de filas RabbitMQ para evitar bloqueios
 - **Persistência Robusta**: PostgreSQL com SQLAlchemy 2 e Alembic
 - **API REST Completa**: FastAPI com documentação automática
 - **Monitoramento**: Controle de uso de tokens e estatísticas de scraping
-- **Exportação**: Relatórios Excel com todos os dados coletados
+- **Exportação Excel**: Relatórios sem duplicatas com valores corretos
+- **Tratamento de Erros**: Sistema robusto com fallbacks automáticos
+
+## 🆕 **ÚLTIMAS ATUALIZAÇÕES (v2.0)**
+
+### ✅ **Correções Implementadas:**
+- **Excel sem duplicatas**: Cada empresa aparece apenas uma vez
+- **Coluna "AUM Valor" corrigida**: Mostra "NAO_DISPONIVEL" ou valor real
+- **Fallback com Regex**: Extrai valores quando OpenAI falha
+- **Tratamento de erros**: Sem mais crashes por problemas de sintaxe
+- **Sistema robusto**: Funciona mesmo com falhas de API externa
+
+### 🔧 **Fallback com Regex:**
+- **Padrões inteligentes**: "290 milhões sob custódia", "patrimônio sob gestão"
+- **Normalização automática**: Converte para valores numéricos
+- **Score de confiança**: 0.7 para extrações via regex
+- **Ativação automática**: Quando OpenAI falha, regex assume
 
 ## 🏗️ Arquitetura
 
@@ -36,7 +53,7 @@ AUM_Scraper/
 
 - Docker e Docker Compose
 - Python 3.11+ (para desenvolvimento local)
-- OpenAI API Key
+- OpenAI API Key (opcional - sistema funciona com fallback)
 
 ### 1. Clone o repositório
 
@@ -50,7 +67,7 @@ cd AUM_Scraper
 Crie um arquivo `.env` na raiz do projeto:
 
 ```bash
-# OpenAI API
+# OpenAI API (opcional - sistema funciona sem ela)
 OPENAI_API_KEY=sua_chave_api_aqui
 
 # Banco de dados
@@ -93,7 +110,7 @@ docker-compose logs -f backend
 - `GET /companies/` - Listar empresas
 - `GET /companies/{id}` - Obter empresa específica
 - `PUT /companies/{id}` - Atualizar empresa
-- `DELETE /companies/{id}` - Remover empresa
+- `DELETE /companies/{id}` - Remover empresa (com limpeza automática)
 
 #### Scraping
 - `POST /companies/{id}/scrape` - Disparar scraping para empresa
@@ -110,7 +127,7 @@ docker-compose logs -f backend
 - `GET /queues/stats` - Status das filas
 
 #### Exportação
-- `POST /export/excel` - Gerar relatório Excel
+- `POST /export/excel` - Gerar relatório Excel (sem duplicatas)
 - `GET /export/download/{filename}` - Download do arquivo
 
 #### Upload
@@ -269,6 +286,7 @@ docker-compose logs backend | grep "ERROR"
 - **Tokens OpenAI**: Monitoramento automático de budget
 - **Status de Scraping**: Taxa de sucesso, bloqueios, erros
 - **Filas RabbitMQ**: Número de mensagens, consumidores
+- **Fallback Regex**: Estatísticas de extração alternativa
 
 ### Alertas
 
@@ -283,6 +301,7 @@ docker-compose logs backend | grep "ERROR"
 - Sanitização de URLs e conteúdo
 - Rate limiting nas filas
 - Logs de auditoria para todas as operações
+- Proteção contra exposição de chaves API
 
 ## 🚨 Troubleshooting
 
@@ -330,6 +349,16 @@ echo $OPENAI_API_KEY
 # Testa conexão
 curl -H "Authorization: Bearer $OPENAI_API_KEY" \
   https://api.openai.com/v1/models
+
+# Sistema funciona com fallback regex mesmo sem OpenAI
+```
+
+#### 5. Excel com duplicatas (RESOLVIDO ✅)
+
+```bash
+# Sistema agora gera Excel sem duplicatas
+# Cada empresa aparece apenas uma vez
+# Coluna "AUM Valor" mostra valores corretos
 ```
 
 ## 📝 Contribuição
@@ -352,6 +381,10 @@ Este projeto está sob a licença MIT. Veja o arquivo `LICENSE` para mais detalh
 
 ## 🔮 Roadmap
 
+- [x] **Sistema robusto com fallbacks** ✅
+- [x] **Excel sem duplicatas** ✅
+- [x] **Fallback com regex** ✅
+- [x] **Tratamento de erros** ✅
 - [ ] Interface web para administração
 - [ ] Sistema de notificações por email
 - [ ] Integração com mais fontes de dados
@@ -360,6 +393,31 @@ Este projeto está sob a licença MIT. Veja o arquivo `LICENSE` para mais detalh
 - [ ] API para terceiros
 - [ ] Sistema de backup automático
 
+## 🎯 **STATUS ATUAL DO PROJETO**
+
+### ✅ **FUNCIONALIDADES IMPLEMENTADAS:**
+- **Sistema 100% funcional** com 5 empresas bancárias
+- **Scraping automático** funcionando perfeitamente
+- **Fallback com regex** ativo quando OpenAI falha
+- **Excel sem duplicatas** com valores corretos
+- **API robusta** com tratamento de erros
+- **Docker funcionando** perfeitamente
+
+### 🔧 **TECNOLOGIAS UTILIZADAS:**
+- **Python 3.11** + FastAPI
+- **PostgreSQL** + SQLAlchemy 2
+- **RabbitMQ** para filas assíncronas
+- **Playwright** para web scraping
+- **OpenAI GPT-4o** + **Regex fallback**
+- **Docker Compose** para orquestração
+
+### 📊 **DADOS DE TESTE:**
+- **5 empresas bancárias** cadastradas
+- **Scraping funcionando** em todas as fontes
+- **Fallback ativo** quando necessário
+- **Excel sendo gerado** corretamente
+
 ---
 
-**Desenvolvido por Giovana Manuquian 2025**
+**Desenvolvido por Giovana Manuquian 2025** 🚀
+**Projeto AUM Scraper - Versão 2.0 - COMPLETO E FUNCIONAL** ✅
